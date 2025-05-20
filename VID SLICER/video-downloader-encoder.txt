@@ -1,0 +1,114 @@
+/* src/encoder/encoder_module.c - Encoder module implementation */
+#include "encoder_module.h"
+#include <stdlib.h>
+#include <string.h>
+#include <json-c/json.h>
+#include <libavutil/opt.h>
+#include <libavutil/hwcontext.h>
+
+/* Convert VC codec to FFmpeg codec ID */
+static enum AVCodecID get_video_codec_id(vc_video_codec_t codec) {
+    switch (codec) {
+        case VC_CODEC_VIDEO_H264: return AV_CODEC_ID_H264;
+        case VC_CODEC_VIDEO_H265: return AV_CODEC_ID_HEVC;
+        case VC_CODEC_VIDEO_VP9:  return AV_CODEC_ID_VP9;
+        case VC_CODEC_VIDEO_AV1:  return AV_CODEC_ID_AV1;
+        default:                  return AV_CODEC_ID_H264;
+    }
+}
+
+static enum AVCodecID get_audio_codec_id(vc_audio_codec_t codec) {
+    switch (codec) {
+        case VC_CODEC_AUDIO_AAC:  return AV_CODEC_ID_AAC;
+        case VC_CODEC_AUDIO_OPUS: return AV_CODEC_ID_OPUS;
+        case VC_CODEC_AUDIO_MP3:  return AV_CODEC_ID_MP3;
+        case VC_CODEC_AUDIO_FLAC: return AV_CODEC_ID_FLAC;
+        default:                  return AV_CODEC_ID_AAC;
+    }
+}
+
+/* Get HW acceleration type */
+static enum AVHWDeviceType get_hw_type(vc_hw_accel_t hw_accel) {
+    switch (hw_accel) {
+        case VC_HW_ACCEL_NVENC:         return AV_HWDEVICE_TYPE_CUDA;
+        case VC_HW_ACCEL_QSV:           return AV_HWDEVICE_TYPE_QSV;
+        case VC_HW_ACCEL_AMF:           return AV_HWDEVICE_TYPE_D3D11VA;
+        case VC_HW_ACCEL_VAAPI:         return AV_HWDEVICE_TYPE_VAAPI;
+        case VC_HW_ACCEL_VIDEOTOOLBOX:  return AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+        default:                        return AV_HWDEVICE_TYPE_NONE;
+    }
+}
+
+/* Initialize hardware acceleration */
+static AVBufferRef* init_hw_acceleration(vc_hw_accel_t hw_accel) {
+    enum AVHWDeviceType type = get_hw_type(hw_accel);
+    if (type == AV_HWDEVICE_TYPE_NONE) {
+        return NULL;
+    }
+    
+    AVBufferRef* hw_device_ctx = NULL;
+    int ret = av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0);
+    if (ret < 0) {
+        return NULL;
+    }
+    
+    return hw_device_ctx;
+}
+
+/* Initialize the video encoder */
+static vc_result_t init_video_encoder(module_ctx_t* ctx, encoder_data_t* encoder) {
+    enum AVCodecID codec_id = get_video_codec_id(encoder->video_codec);
+    const AVCodec* codec = NULL;
+    
+    if (encoder->hw_accel != VC_HW_ACCEL_NONE) {
+        /* Look for hardware encoder */
+        if (encoder->hw_accel == VC_HW_ACCEL_NVENC && codec_id == AV_CODEC_ID_H264) {
+            codec = avcodec_find_encoder_by_name("h264_nvenc");
+        } else if (encoder->hw_accel == VC_HW_ACCEL_NVENC && codec_id == AV_CODEC_ID_HEVC) {
+            codec = avcodec_find_encoder_by_name("hevc_nvenc");
+        } else if (encoder->hw_accel == VC_HW_ACCEL_QSV && codec_id == AV_CODEC_ID_H264) {
+            codec = avcodec_find_encoder_by_name("h264_qsv");
+        } else if (encoder->hw_accel == VC_HW_ACCEL_VAAPI && codec_id == AV_CODEC_ID_H264) {
+            codec = avcodec_find_encoder_by_name("h264_vaapi");
+        } else if (encoder->hw_accel == VC_HW_ACCEL_VIDEOTOOLBOX && codec_id == AV_CODEC_ID_H264) {
+            codec = avcodec_find_encoder_by_name("h264_videotoolbox");
+        }
+    }
+    
+    /* Fallback to software encoder if hardware not available */
+    if (!codec) {
+        codec = avcodec_find_encoder(codec_id);
+    }
+    
+    if (!codec) {
+        module_set_error(ctx, "Could not find video encoder");
+        return VC_ERROR_ENCODING_FAILED;
+    }
+    
+    encoder->video_codec_ctx = avcodec_alloc_context3(codec);
+    if (!encoder->video_codec_ctx) {
+        module_set_error(ctx, "Could not allocate video codec context");
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    /* Configure encoder */
+    encoder->video_codec_ctx->width = encoder->width;
+    encoder->video_codec_ctx->height = encoder->height;
+    encoder->video_codec_ctx->time_base = (AVRational){1, encoder->fps};
+    encoder->video_codec_ctx->framerate = (AVRational){encoder->fps, 1};
+    encoder->video_codec_ctx->gop_size = encoder->gop_size > 0 ? encoder->gop_size : encoder->fps * 2;
+    encoder->video_codec_ctx->max_b_frames = 1;
+    encoder->video_codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    encoder->video_codec_ctx->bit_rate = encoder->video_bitrate * 1000;
+    
+    /* Set hardware acceleration */
+    if (encoder->hw_device_ctx) {
+        encoder->video_codec_ctx->hw_device_ctx = av_buffer_ref(encoder->hw_device_ctx);
+        encoder->video_codec_ctx->pix_fmt = AV_PIX_FMT_CUDA;
+    }
+    
+    /* Set quality preset */
+    if (codec->id == AV_CODEC_ID_H264 || codec->id == AV_CODEC_ID_HEVC) {
+        av_opt_set(encoder->video_codec_ctx->priv_data, "preset", "medium", 0);
+        av_opt_set(encoder->video_codec_ctx->priv_data, "profile", "main", 0);
+        av_opt_set(encoder->video_codec_ctx->priv_data, "tune", "z

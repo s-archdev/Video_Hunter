@@ -1,0 +1,184 @@
+// src/core/ring_buffer.c - Lock-free ring buffer implementation
+#include "ring_buffer.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdatomic.h>
+#include <pthread.h>
+#include <errno.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+// Structure for the ring buffer
+struct ring_buffer_t {
+    uint8_t* buffer;                // The actual data buffer
+    size_t capacity;                // Total capacity in elements
+    size_t element_size;            // Size of each element in bytes
+    
+    // Metadata buffer for each frame
+    frame_metadata_t* metadata;
+    
+    // Atomic read/write positions
+    atomic_size_t read_pos;
+    atomic_size_t write_pos;
+    
+    // Synchronization
+    pthread_mutex_t mutex;
+    pthread_cond_t not_empty;
+    pthread_cond_t not_full;
+    
+    // Shared memory handling
+    bool is_shared;
+    char shm_name[64];
+    
+#ifdef _WIN32
+    HANDLE mapping_handle;
+#else
+    int shm_fd;
+#endif
+    
+    size_t total_size;  // Total size of shared memory region
+};
+
+// Calculate required buffer size including metadata
+static size_t calculate_total_size(size_t capacity, size_t element_size) {
+    size_t data_size = capacity * element_size;
+    size_t metadata_size = capacity * sizeof(frame_metadata_t);
+    size_t header_size = sizeof(struct ring_buffer_t);
+    
+    return header_size + data_size + metadata_size;
+}
+
+// Create a new ring buffer
+ring_buffer_t* ring_buffer_create(size_t capacity, size_t element_size) {
+    if (capacity == 0 || element_size == 0) {
+        return NULL;
+    }
+    
+    // Allocate the ring buffer structure
+    ring_buffer_t* rb = (ring_buffer_t*)calloc(1, sizeof(ring_buffer_t));
+    if (!rb) {
+        return NULL;
+    }
+    
+    // Initialize the buffer
+    rb->capacity = capacity;
+    rb->element_size = element_size;
+    rb->buffer = (uint8_t*)calloc(capacity, element_size);
+    rb->metadata = (frame_metadata_t*)calloc(capacity, sizeof(frame_metadata_t));
+    
+    if (!rb->buffer || !rb->metadata) {
+        free(rb->buffer);
+        free(rb->metadata);
+        free(rb);
+        return NULL;
+    }
+    
+    // Initialize atomic counters
+    atomic_init(&rb->read_pos, 0);
+    atomic_init(&rb->write_pos, 0);
+    
+    // Initialize synchronization primitives
+    pthread_mutex_init(&rb->mutex, NULL);
+    pthread_cond_init(&rb->not_empty, NULL);
+    pthread_cond_init(&rb->not_full, NULL);
+    
+    rb->is_shared = false;
+    rb->total_size = calculate_total_size(capacity, element_size);
+    
+    return rb;
+}
+
+// Create a ring buffer in shared memory for IPC
+static ring_buffer_t* ring_buffer_create_shared(const char* name, size_t capacity, size_t element_size) {
+    size_t total_size = calculate_total_size(capacity, element_size);
+    ring_buffer_t* rb = NULL;
+    void* shared_mem = NULL;
+    
+#ifdef _WIN32
+    // Windows shared memory implementation
+    HANDLE mapping_handle = CreateFileMappingA(
+        INVALID_HANDLE_VALUE,   // Use paging file
+        NULL,                   // Default security attributes
+        PAGE_READWRITE,         // Read/write access
+        0,                      // High-order DWORD of size
+        (DWORD)total_size,      // Low-order DWORD of size
+        name);                  // Name of mapping object
+    
+    if (mapping_handle == NULL) {
+        return NULL;
+    }
+    
+    shared_mem = MapViewOfFile(
+        mapping_handle,         // Handle to mapping object
+        FILE_MAP_ALL_ACCESS,    // Read/write access
+        0,                      // High-order DWORD of offset
+        0,                      // Low-order DWORD of offset
+        total_size);            // Number of bytes to map
+    
+    if (shared_mem == NULL) {
+        CloseHandle(mapping_handle);
+        return NULL;
+    }
+    
+    rb = (ring_buffer_t*)shared_mem;
+    rb->mapping_handle = mapping_handle;
+#else
+    // POSIX shared memory implementation
+    int shm_fd = shm_open(name, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    if (shm_fd == -1) {
+        return NULL;
+    }
+    
+    // Set the size of the shared memory region
+    if (ftruncate(shm_fd, total_size) == -1) {
+        close(shm_fd);
+        shm_unlink(name);
+        return NULL;
+    }
+    
+    // Map the shared memory
+    shared_mem = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shared_mem == MAP_FAILED) {
+        close(shm_fd);
+        shm_unlink(name);
+        return NULL;
+    }
+    
+    rb = (ring_buffer_t*)shared_mem;
+    rb->shm_fd = shm_fd;
+#endif
+    
+    // Initialize the ring buffer in shared memory
+    rb->capacity = capacity;
+    rb->element_size = element_size;
+    rb->total_size = total_size;
+    rb->is_shared = true;
+    strncpy(rb->shm_name, name, sizeof(rb->shm_name) - 1);
+    rb->shm_name[sizeof(rb->shm_name) - 1] = '\0';
+    
+    // Setup pointers to data and metadata areas within the shared memory
+    uint8_t* mem_ptr = (uint8_t*)shared_mem;
+    mem_ptr += sizeof(ring_buffer_t);
+    rb->buffer = mem_ptr;
+    mem_ptr += capacity * element_size;
+    rb->metadata = (frame_metadata_t*)mem_ptr;
+    
+    // Initialize atomic counters
+    atomic_init(&rb->read_pos, 0);
+    atomic_init(&rb->write_pos, 0);
+    
+    // Initialize synchronization primitives with shared memory attributes
+    pthread_mutexattr_t mutex_attr;
+    pthread_mutexattr_init(&mutex_attr);
+    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&rb->mutex, &mutex_attr);
+    pthread_mutexattr_destroy(&mutex_attr);
+    
+    pthrea

@@ -1,0 +1,621 @@
+// include/screencast.h - Main public API
+#ifndef SCREENCAST_H
+#define SCREENCAST_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Configuration struct for screencast
+typedef struct {
+    // Video settings
+    int width;
+    int height;
+    int fps;
+    int64_t video_bitrate;
+    const char* video_codec; // "h264", "hevc", etc.
+    
+    // Audio settings
+    int sample_rate;
+    int channels;
+    int64_t audio_bitrate;
+    const char* audio_codec; // "aac", "opus", etc.
+    
+    // Output settings
+    const char* output_path;
+    const char* format; // "mp4", "mkv", etc.
+    
+    // Capture settings
+    int display_index;
+    bool capture_cursor;
+    bool capture_audio;
+    
+    // Advanced settings
+    bool use_hardware_accel;
+    int gop_size;
+    const char* hardware_encoder; // "nvenc", "vaapi", "qsv", etc.
+    int thread_count;
+    
+    // Logging
+    int log_level; // 0=none, 1=error, 2=warning, 3=info, 4=debug
+} screencast_config_t;
+
+// Status/error codes
+typedef enum {
+    SCREENCAST_OK = 0,
+    SCREENCAST_ERROR_INIT_FAILED = -1,
+    SCREENCAST_ERROR_CAPTURE_FAILED = -2,
+    SCREENCAST_ERROR_ENCODING_FAILED = -3,
+    SCREENCAST_ERROR_OUTPUT_FAILED = -4,
+    SCREENCAST_ERROR_INVALID_PARAM = -5,
+    SCREENCAST_ERROR_PERMISSION_DENIED = -6,
+    SCREENCAST_ERROR_DRIVER_NOT_LOADED = -7,
+    SCREENCAST_ERROR_DRM_PROTECTED_CONTENT = -8,
+    SCREENCAST_ERROR_NOT_IMPLEMENTED = -9
+} screencast_status_t;
+
+// Session handle
+typedef struct screencast_context_t* screencast_handle_t;
+
+// Initialize with default configuration
+screencast_config_t screencast_config_default(void);
+
+// Initialize screencast session
+screencast_status_t screencast_init(const screencast_config_t* config, screencast_handle_t* handle);
+
+// Start recording
+screencast_status_t screencast_start(screencast_handle_t handle);
+
+// Stop recording
+screencast_status_t screencast_stop(screencast_handle_t handle);
+
+// Clean up and free resources
+void screencast_destroy(screencast_handle_t handle);
+
+// Get current statistics
+typedef struct {
+    uint64_t frames_captured;
+    uint64_t frames_encoded;
+    uint64_t frames_dropped;
+    double current_fps;
+    uint64_t bytes_written;
+    uint64_t audio_samples_processed;
+    int64_t audio_video_drift_ms;
+    double cpu_usage;
+    double memory_usage_mb;
+} screencast_stats_t;
+
+screencast_status_t screencast_get_stats(screencast_handle_t handle, screencast_stats_t* stats);
+
+// Version information
+const char* screencast_version(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // SCREENCAST_H
+
+// include/display_driver.h - Virtual display driver interface
+#ifndef DISPLAY_DRIVER_H
+#define DISPLAY_DRIVER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct display_driver_t* display_driver_handle_t;
+
+typedef enum {
+    DISPLAY_DRIVER_OK = 0,
+    DISPLAY_DRIVER_ERROR_INIT = -1,
+    DISPLAY_DRIVER_ERROR_PERMISSION = -2,
+    DISPLAY_DRIVER_ERROR_NOT_SUPPORTED = -3,
+    DISPLAY_DRIVER_ERROR_ALREADY_EXISTS = -4
+} display_driver_status_t;
+
+// Initialize the virtual display driver
+display_driver_status_t display_driver_init(int width, int height, int refresh_rate, 
+                                           display_driver_handle_t* handle);
+
+// Get device path/identifier for the virtual display
+const char* display_driver_get_device_path(display_driver_handle_t handle);
+
+// Get display index (e.g., monitor number)
+int display_driver_get_display_index(display_driver_handle_t handle);
+
+// Submit a frame to the virtual display
+display_driver_status_t display_driver_submit_frame(display_driver_handle_t handle,
+                                                   const uint8_t* frame_data,
+                                                   int stride);
+
+// Clean up
+void display_driver_destroy(display_driver_handle_t handle);
+
+// Installation helpers
+bool display_driver_is_installed(void);
+display_driver_status_t display_driver_install(void);
+display_driver_status_t display_driver_uninstall(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // DISPLAY_DRIVER_H
+
+// include/video_capture.h - Video capture module interface
+#ifndef VIDEO_CAPTURE_H
+#define VIDEO_CAPTURE_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "ring_buffer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct video_capture_t* video_capture_handle_t;
+
+typedef enum {
+    VIDEO_CAPTURE_OK = 0,
+    VIDEO_CAPTURE_ERROR_INIT = -1,
+    VIDEO_CAPTURE_ERROR_PERMISSION = -2,
+    VIDEO_CAPTURE_ERROR_INVALID_DISPLAY = -3,
+    VIDEO_CAPTURE_ERROR_DRM_PROTECTED = -4
+} video_capture_status_t;
+
+typedef struct {
+    int display_index;
+    int width;
+    int height;
+    int fps;
+    bool capture_cursor;
+    bool prefer_direct_capture; // Prefer direct GPU memory access if available
+    ring_buffer_t* output_buffer;
+} video_capture_config_t;
+
+// Initialize video capture
+video_capture_status_t video_capture_init(const video_capture_config_t* config,
+                                         video_capture_handle_t* handle);
+
+// Start capturing
+video_capture_status_t video_capture_start(video_capture_handle_t handle);
+
+// Stop capturing
+video_capture_status_t video_capture_stop(video_capture_handle_t handle);
+
+// Cleanup
+void video_capture_destroy(video_capture_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // VIDEO_CAPTURE_H
+
+// include/audio_loopback.h - Audio loopback module interface
+#ifndef AUDIO_LOOPBACK_H
+#define AUDIO_LOOPBACK_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "ring_buffer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct audio_loopback_t* audio_loopback_handle_t;
+
+typedef enum {
+    AUDIO_LOOPBACK_OK = 0,
+    AUDIO_LOOPBACK_ERROR_INIT = -1,
+    AUDIO_LOOPBACK_ERROR_PERMISSION = -2,
+    AUDIO_LOOPBACK_ERROR_NOT_SUPPORTED = -3,
+    AUDIO_LOOPBACK_ERROR_DRM_PROTECTED = -4
+} audio_loopback_status_t;
+
+typedef struct {
+    int sample_rate;
+    int channels;
+    const char* device_name; // NULL for default
+    ring_buffer_t* output_buffer;
+} audio_loopback_config_t;
+
+// Initialize audio loopback
+audio_loopback_status_t audio_loopback_init(const audio_loopback_config_t* config,
+                                           audio_loopback_handle_t* handle);
+
+// Start capturing
+audio_loopback_status_t audio_loopback_start(audio_loopback_handle_t handle);
+
+// Stop capturing
+audio_loopback_status_t audio_loopback_stop(audio_loopback_handle_t handle);
+
+// Cleanup
+void audio_loopback_destroy(audio_loopback_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // AUDIO_LOOPBACK_H
+
+// include/sync_module.h - Synchronization module interface
+#ifndef SYNC_MODULE_H
+#define SYNC_MODULE_H
+
+#include <stdint.h>
+#include "ring_buffer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct sync_module_t* sync_module_handle_t;
+
+typedef enum {
+    SYNC_MODULE_OK = 0,
+    SYNC_MODULE_ERROR_INIT = -1,
+    SYNC_MODULE_ERROR_NO_DATA = -2
+} sync_module_status_t;
+
+typedef struct {
+    ring_buffer_t* video_input_buffer;
+    ring_buffer_t* audio_input_buffer;
+    ring_buffer_t* video_output_buffer;
+    ring_buffer_t* audio_output_buffer;
+    int video_fps;
+    int audio_sample_rate;
+    int audio_channels;
+    int max_drift_ms; // Maximum drift to correct for
+} sync_module_config_t;
+
+// Initialize sync module
+sync_module_status_t sync_module_init(const sync_module_config_t* config,
+                                     sync_module_handle_t* handle);
+
+// Start processing
+sync_module_status_t sync_module_start(sync_module_handle_t handle);
+
+// Stop processing
+sync_module_status_t sync_module_stop(sync_module_handle_t handle);
+
+// Get current drift in milliseconds
+int64_t sync_module_get_drift_ms(sync_module_handle_t handle);
+
+// Cleanup
+void sync_module_destroy(sync_module_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // SYNC_MODULE_H
+
+// include/encoder.h - Encoder module interface
+#ifndef ENCODER_H
+#define ENCODER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "ring_buffer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct encoder_t* encoder_handle_t;
+
+typedef enum {
+    ENCODER_OK = 0,
+    ENCODER_ERROR_INIT = -1,
+    ENCODER_ERROR_UNSUPPORTED_CODEC = -2,
+    ENCODER_ERROR_HARDWARE_UNAVAILABLE = -3
+} encoder_status_t;
+
+typedef struct {
+    // Video settings
+    int width;
+    int height;
+    int fps;
+    int64_t video_bitrate;
+    const char* video_codec;
+    int gop_size;
+    
+    // Audio settings
+    int sample_rate;
+    int channels;
+    int64_t audio_bitrate;
+    const char* audio_codec;
+    
+    // Hardware acceleration
+    bool use_hardware_accel;
+    const char* hardware_encoder;
+    
+    // Buffers
+    ring_buffer_t* video_input_buffer;
+    ring_buffer_t* audio_input_buffer;
+    ring_buffer_t* video_output_buffer;
+    ring_buffer_t* audio_output_buffer;
+} encoder_config_t;
+
+// Initialize encoder
+encoder_status_t encoder_init(const encoder_config_t* config,
+                             encoder_handle_t* handle);
+
+// Start encoding
+encoder_status_t encoder_start(encoder_handle_t handle);
+
+// Stop encoding
+encoder_status_t encoder_stop(encoder_handle_t handle);
+
+// Get stats
+typedef struct {
+    uint64_t video_frames_encoded;
+    uint64_t video_frames_dropped;
+    uint64_t audio_samples_encoded;
+    double video_encoding_fps;
+    double current_video_bitrate;
+    double current_audio_bitrate;
+} encoder_stats_t;
+
+encoder_status_t encoder_get_stats(encoder_handle_t handle, encoder_stats_t* stats);
+
+// Cleanup
+void encoder_destroy(encoder_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // ENCODER_H
+
+// include/muxer.h - Muxer module interface
+#ifndef MUXER_H
+#define MUXER_H
+
+#include <stdint.h>
+#include "ring_buffer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct muxer_t* muxer_handle_t;
+
+typedef enum {
+    MUXER_OK = 0,
+    MUXER_ERROR_INIT = -1,
+    MUXER_ERROR_FILE_ACCESS = -2,
+    MUXER_ERROR_FORMAT_UNSUPPORTED = -3
+} muxer_status_t;
+
+typedef struct {
+    const char* output_path;
+    const char* format;
+    ring_buffer_t* video_input_buffer;
+    ring_buffer_t* audio_input_buffer;
+    const char* video_codec_name;
+    const char* audio_codec_name;
+    // Metadata
+    const char* title;
+    const char* author;
+    const char* comment;
+} muxer_config_t;
+
+// Initialize muxer
+muxer_status_t muxer_init(const muxer_config_t* config,
+                         muxer_handle_t* handle);
+
+// Start muxing
+muxer_status_t muxer_start(muxer_handle_t handle);
+
+// Stop muxing
+muxer_status_t muxer_stop(muxer_handle_t handle);
+
+// Get stats
+typedef struct {
+    uint64_t bytes_written;
+    uint64_t video_packets_written;
+    uint64_t audio_packets_written;
+    double duration_seconds;
+} muxer_stats_t;
+
+muxer_status_t muxer_get_stats(muxer_handle_t handle, muxer_stats_t* stats);
+
+// Cleanup
+void muxer_destroy(muxer_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // MUXER_H
+
+// include/ring_buffer.h - Ring buffer implementation for low-latency data transfer
+#ifndef RING_BUFFER_H
+#define RING_BUFFER_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct ring_buffer_t ring_buffer_t;
+
+// Frame metadata for video/audio data
+typedef struct {
+    int64_t timestamp_us;  // Microseconds
+    uint32_t size;         // Size in bytes
+    bool is_keyframe;      // For video only
+    int width;             // For video only
+    int height;            // For video only
+    int format;            // Pixel format (video) or sample format (audio)
+    int64_t pts;           // Presentation timestamp
+    int64_t dts;           // Decoding timestamp
+    void* opaque;          // Format-specific data
+} frame_metadata_t;
+
+// Create a new ring buffer
+ring_buffer_t* ring_buffer_create(size_t capacity, size_t element_size);
+
+// Destroy a ring buffer
+void ring_buffer_destroy(ring_buffer_t* rb);
+
+// Write a frame to the ring buffer
+bool ring_buffer_write(ring_buffer_t* rb, const void* data, size_t size, 
+                     const frame_metadata_t* metadata);
+
+// Read a frame from the ring buffer
+bool ring_buffer_read(ring_buffer_t* rb, void* data, size_t* size, 
+                    frame_metadata_t* metadata);
+
+// Peek at a frame without removing it
+bool ring_buffer_peek(ring_buffer_t* rb, void* data, size_t* size, 
+                    frame_metadata_t* metadata);
+
+// Get number of elements in the ring buffer
+size_t ring_buffer_size(const ring_buffer_t* rb);
+
+// Check if the ring buffer is empty
+bool ring_buffer_is_empty(const ring_buffer_t* rb);
+
+// Check if the ring buffer is full
+bool ring_buffer_is_full(const ring_buffer_t* rb);
+
+// Clear the ring buffer
+void ring_buffer_clear(ring_buffer_t* rb);
+
+// Get shared memory name for cross-process usage
+const char* ring_buffer_get_shm_name(const ring_buffer_t* rb);
+
+// Create a ring buffer from existing shared memory
+ring_buffer_t* ring_buffer_open_shared(const char* name);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // RING_BUFFER_H
+
+// include/pipeline.h - Pipeline orchestration interface
+#ifndef PIPELINE_H
+#define PIPELINE_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "video_capture.h"
+#include "audio_loopback.h"
+#include "sync_module.h"
+#include "encoder.h"
+#include "muxer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct pipeline_t* pipeline_handle_t;
+
+typedef enum {
+    PIPELINE_OK = 0,
+    PIPELINE_ERROR_INIT = -1,
+    PIPELINE_ERROR_START = -2,
+    PIPELINE_ERROR_STOP = -3,
+    PIPELINE_ERROR_COMPONENT = -4
+} pipeline_status_t;
+
+typedef struct {
+    video_capture_config_t video_config;
+    audio_loopback_config_t audio_config;
+    sync_module_config_t sync_config;
+    encoder_config_t encoder_config;
+    muxer_config_t muxer_config;
+    bool enable_audio;
+    int buffer_size;
+    int thread_priority;
+} pipeline_config_t;
+
+// Initialize the pipeline
+pipeline_status_t pipeline_init(const pipeline_config_t* config,
+                              pipeline_handle_t* handle);
+
+// Start the pipeline
+pipeline_status_t pipeline_start(pipeline_handle_t handle);
+
+// Stop the pipeline
+pipeline_status_t pipeline_stop(pipeline_handle_t handle);
+
+// Get combined statistics
+typedef struct {
+    video_capture_status_t video_status;
+    audio_loopback_status_t audio_status;
+    sync_module_status_t sync_status;
+    encoder_status_t encoder_status;
+    muxer_status_t muxer_status;
+    encoder_stats_t encoder_stats;
+    muxer_stats_t muxer_stats;
+    int64_t audio_video_drift_ms;
+    double cpu_usage;
+    double memory_usage_mb;
+} pipeline_stats_t;
+
+pipeline_status_t pipeline_get_stats(pipeline_handle_t handle, pipeline_stats_t* stats);
+
+// Cleanup
+void pipeline_destroy(pipeline_handle_t handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // PIPELINE_H
+
+// include/logger.h - Logging utilities
+#ifndef LOGGER_H
+#define LOGGER_H
+
+#include <stdarg.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    LOG_LEVEL_NONE = 0,
+    LOG_LEVEL_ERROR = 1,
+    LOG_LEVEL_WARNING = 2,
+    LOG_LEVEL_INFO = 3,
+    LOG_LEVEL_DEBUG = 4
+} log_level_t;
+
+// Initialize logger
+void logger_init(log_level_t level);
+
+// Set log level
+void logger_set_level(log_level_t level);
+
+// Log functions
+void logger_error(const char* format, ...);
+void logger_warning(const char* format, ...);
+void logger_info(const char* format, ...);
+void logger_debug(const char* format, ...);
+
+// Cleanup
+void logger_cleanup(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // LOGGER_H

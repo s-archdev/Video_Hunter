@@ -1,0 +1,92 @@
+cmake_minimum_required(VERSION 3.12)
+project(screencast VERSION 0.1.0 LANGUAGES C CXX)
+
+# Options
+option(USE_HARDWARE_ACCELERATION "Enable hardware acceleration if available" ON)
+option(BUILD_TESTS "Build test suite" OFF)
+
+# Find required packages
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libavutil libswscale)
+pkg_check_modules(THREADS REQUIRED pthread)
+
+# Platform-specific dependencies
+if(WIN32)
+    # Windows-specific dependencies
+    set(PLATFORM_SOURCES 
+        src/platform/win/display_driver.cpp
+        src/platform/win/video_capture.cpp
+        src/platform/win/audio_loopback.cpp
+    )
+    set(PLATFORM_LIBS 
+        d3d11 dxgi ole32 user32 
+        avrt.lib ksuser.lib
+    )
+elseif(APPLE)
+    # macOS-specific dependencies
+    set(PLATFORM_SOURCES 
+        src/platform/macos/display_driver.mm
+        src/platform/macos/video_capture.mm
+        src/platform/macos/audio_loopback.mm
+    )
+    set(PLATFORM_LIBS 
+        "-framework CoreGraphics"
+        "-framework CoreMedia"
+        "-framework CoreVideo" 
+        "-framework CoreAudio"
+        "-framework AudioToolbox"
+        "-framework CoreDisplay"
+    )
+else()
+    # Linux-specific dependencies
+    set(PLATFORM_SOURCES 
+        src/platform/linux/display_driver.c
+        src/platform/linux/video_capture.c
+        src/platform/linux/audio_loopback.c
+    )
+    pkg_check_modules(LINUX_DEPS REQUIRED x11 xfixes pulse-simple)
+    set(PLATFORM_LIBS 
+        ${LINUX_DEPS_LIBRARIES}
+        v4l2
+    )
+endif()
+
+# Common source files
+set(COMMON_SOURCES
+    src/core/ring_buffer.c
+    src/core/sync_module.c
+    src/core/encoder.c
+    src/core/muxer.c
+    src/core/pipeline.c
+    src/core/logger.c
+    src/main.c
+)
+
+# Includes
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${FFMPEG_INCLUDE_DIRS}
+)
+
+# Create executable
+add_executable(screencast 
+    ${COMMON_SOURCES}
+    ${PLATFORM_SOURCES}
+)
+
+# Link libraries
+target_link_libraries(screencast
+    ${FFMPEG_LIBRARIES}
+    ${PLATFORM_LIBS}
+    ${THREADS_LIBRARIES}
+)
+
+# Installation
+install(TARGETS screencast DESTINATION bin)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/screencast.conf DESTINATION etc)
+
+# Tests
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

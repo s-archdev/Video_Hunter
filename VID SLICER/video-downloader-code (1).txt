@@ -1,0 +1,1251 @@
+/*
+ * VideoCapture - Cross-platform lightweight video downloader
+ * Core implementation with main headers and source files
+ */
+
+/* include/videocapture.h - Main public API */
+#ifndef VIDEOCAPTURE_H
+#define VIDEOCAPTURE_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Return codes */
+typedef enum {
+    VC_SUCCESS = 0,
+    VC_ERROR_INVALID_PARAM = -1,
+    VC_ERROR_NOT_INITIALIZED = -2,
+    VC_ERROR_ALREADY_INITIALIZED = -3,
+    VC_ERROR_PLATFORM_NOT_SUPPORTED = -4,
+    VC_ERROR_DRIVER_NOT_INSTALLED = -5,
+    VC_ERROR_PERMISSION_DENIED = -6,
+    VC_ERROR_DRM_PROTECTED_CONTENT = -7,
+    VC_ERROR_ENCODING_FAILED = -8,
+    VC_ERROR_OUT_OF_MEMORY = -9,
+    VC_ERROR_IO = -10,
+    VC_ERROR_TIMEOUT = -11,
+    VC_ERROR_UNKNOWN = -99
+} vc_result_t;
+
+/* Pixel formats */
+typedef enum {
+    VC_PIXEL_FORMAT_UNKNOWN = 0,
+    VC_PIXEL_FORMAT_RGB24,
+    VC_PIXEL_FORMAT_RGBA32,
+    VC_PIXEL_FORMAT_BGRA32,
+    VC_PIXEL_FORMAT_NV12,
+    VC_PIXEL_FORMAT_YUV420P,
+    VC_PIXEL_FORMAT_YUY2
+} vc_pixel_format_t;
+
+/* Audio sample formats */
+typedef enum {
+    VC_SAMPLE_FORMAT_UNKNOWN = 0,
+    VC_SAMPLE_FORMAT_U8,
+    VC_SAMPLE_FORMAT_S16,
+    VC_SAMPLE_FORMAT_S32,
+    VC_SAMPLE_FORMAT_FLT,
+    VC_SAMPLE_FORMAT_DBL
+} vc_sample_format_t;
+
+/* Video codec types */
+typedef enum {
+    VC_CODEC_VIDEO_UNKNOWN = 0,
+    VC_CODEC_VIDEO_H264,
+    VC_CODEC_VIDEO_H265,
+    VC_CODEC_VIDEO_VP9,
+    VC_CODEC_VIDEO_AV1
+} vc_video_codec_t;
+
+/* Audio codec types */
+typedef enum {
+    VC_CODEC_AUDIO_UNKNOWN = 0,
+    VC_CODEC_AUDIO_AAC,
+    VC_CODEC_AUDIO_OPUS,
+    VC_CODEC_AUDIO_MP3,
+    VC_CODEC_AUDIO_FLAC
+} vc_audio_codec_t;
+
+/* Container formats */
+typedef enum {
+    VC_CONTAINER_UNKNOWN = 0,
+    VC_CONTAINER_MP4,
+    VC_CONTAINER_MKV,
+    VC_CONTAINER_WEBM
+} vc_container_t;
+
+/* Encoder hardware acceleration */
+typedef enum {
+    VC_HW_ACCEL_NONE = 0,
+    VC_HW_ACCEL_AUTO,
+    VC_HW_ACCEL_NVENC,
+    VC_HW_ACCEL_QSV,
+    VC_HW_ACCEL_AMF,
+    VC_HW_ACCEL_VAAPI,
+    VC_HW_ACCEL_VIDEOTOOLBOX
+} vc_hw_accel_t;
+
+/* Configuration structure */
+typedef struct {
+    /* Video settings */
+    int width;
+    int height;
+    int fps;
+    vc_video_codec_t video_codec;
+    int video_bitrate;  /* in kbps */
+    vc_pixel_format_t pixel_format;
+    
+    /* Audio settings */
+    int sample_rate;
+    int channels;
+    vc_audio_codec_t audio_codec;
+    int audio_bitrate;  /* in kbps */
+    vc_sample_format_t sample_format;
+    
+    /* Output settings */
+    const char* output_file;
+    vc_container_t container;
+    
+    /* Capture settings */
+    bool capture_cursor;
+    bool capture_clicks;
+    int display_index;  /* -1 for virtual display */
+    
+    /* Advanced settings */
+    vc_hw_accel_t hw_accel;
+    int gop_size;       /* 0 for auto */
+    int thread_count;   /* 0 for auto */
+    
+    /* Callback functions */
+    void (*progress_callback)(float progress, void* user_data);
+    void (*error_callback)(vc_result_t error, const char* message, void* user_data);
+    void* user_data;
+} vc_config_t;
+
+/* Context handle */
+typedef struct vc_context_t* vc_context;
+
+/* Initialize library with default configuration */
+vc_context vc_init(void);
+
+/* Clean up and free resources */
+void vc_free(vc_context ctx);
+
+/* Set configuration parameters */
+vc_result_t vc_configure(vc_context ctx, const vc_config_t* config);
+
+/* Start capturing */
+vc_result_t vc_start_capture(vc_context ctx);
+
+/* Stop capturing */
+vc_result_t vc_stop_capture(vc_context ctx);
+
+/* Pause capturing */
+vc_result_t vc_pause_capture(vc_context ctx);
+
+/* Resume capturing */
+vc_result_t vc_resume_capture(vc_context ctx);
+
+/* Get version string */
+const char* vc_get_version(void);
+
+/* Get last error message */
+const char* vc_get_error_message(vc_context ctx);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* VIDEOCAPTURE_H */
+
+/* src/core/ringbuffer.h - Ring buffer implementation */
+#ifndef RINGBUFFER_H
+#define RINGBUFFER_H
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <pthread.h>
+
+typedef struct {
+    void* buffer;
+    size_t elem_size;
+    size_t capacity;
+    volatile size_t read_pos;
+    volatile size_t write_pos;
+    pthread_mutex_t mutex;
+    pthread_cond_t not_empty;
+    pthread_cond_t not_full;
+    bool closed;
+} ringbuffer_t;
+
+/* Initialize a ring buffer with the given capacity and element size */
+bool ringbuffer_init(ringbuffer_t* rb, size_t capacity, size_t elem_size);
+
+/* Clean up a ring buffer */
+void ringbuffer_free(ringbuffer_t* rb);
+
+/* Write an element to the ring buffer */
+bool ringbuffer_write(ringbuffer_t* rb, const void* elem, int timeout_ms);
+
+/* Read an element from the ring buffer */
+bool ringbuffer_read(ringbuffer_t* rb, void* elem, int timeout_ms);
+
+/* Get the number of elements in the ring buffer */
+size_t ringbuffer_size(ringbuffer_t* rb);
+
+/* Check if the ring buffer is empty */
+bool ringbuffer_is_empty(ringbuffer_t* rb);
+
+/* Check if the ring buffer is full */
+bool ringbuffer_is_full(ringbuffer_t* rb);
+
+/* Close the ring buffer, no more writing allowed */
+void ringbuffer_close(ringbuffer_t* rb);
+
+#endif /* RINGBUFFER_H */
+
+/* src/core/ringbuffer.c - Ring buffer implementation */
+#include "ringbuffer.h"
+#include <string.h>
+#include <time.h>
+#include <errno.h>
+
+bool ringbuffer_init(ringbuffer_t* rb, size_t capacity, size_t elem_size) {
+    if (!rb || capacity == 0 || elem_size == 0) {
+        return false;
+    }
+    
+    rb->buffer = malloc(capacity * elem_size);
+    if (!rb->buffer) {
+        return false;
+    }
+    
+    rb->elem_size = elem_size;
+    rb->capacity = capacity;
+    rb->read_pos = 0;
+    rb->write_pos = 0;
+    rb->closed = false;
+    
+    if (pthread_mutex_init(&rb->mutex, NULL) != 0) {
+        free(rb->buffer);
+        return false;
+    }
+    
+    if (pthread_cond_init(&rb->not_empty, NULL) != 0) {
+        pthread_mutex_destroy(&rb->mutex);
+        free(rb->buffer);
+        return false;
+    }
+    
+    if (pthread_cond_init(&rb->not_full, NULL) != 0) {
+        pthread_cond_destroy(&rb->not_empty);
+        pthread_mutex_destroy(&rb->mutex);
+        free(rb->buffer);
+        return false;
+    }
+    
+    return true;
+}
+
+void ringbuffer_free(ringbuffer_t* rb) {
+    if (!rb) {
+        return;
+    }
+    
+    pthread_mutex_lock(&rb->mutex);
+    if (rb->buffer) {
+        free(rb->buffer);
+        rb->buffer = NULL;
+    }
+    rb->closed = true;
+    pthread_cond_broadcast(&rb->not_empty);
+    pthread_cond_broadcast(&rb->not_full);
+    pthread_mutex_unlock(&rb->mutex);
+    
+    pthread_cond_destroy(&rb->not_empty);
+    pthread_cond_destroy(&rb->not_full);
+    pthread_mutex_destroy(&rb->mutex);
+}
+
+static bool wait_for_condition(pthread_cond_t* cond, pthread_mutex_t* mutex, int timeout_ms) {
+    if (timeout_ms <= 0) {
+        return pthread_cond_wait(cond, mutex) == 0;
+    } else {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += timeout_ms / 1000;
+        ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_sec += 1;
+            ts.tv_nsec -= 1000000000;
+        }
+        return pthread_cond_timedwait(cond, mutex, &ts) == 0;
+    }
+}
+
+bool ringbuffer_write(ringbuffer_t* rb, const void* elem, int timeout_ms) {
+    if (!rb || !elem) {
+        return false;
+    }
+    
+    pthread_mutex_lock(&rb->mutex);
+    
+    while (ringbuffer_is_full(rb) && !rb->closed) {
+        if (!wait_for_condition(&rb->not_full, &rb->mutex, timeout_ms)) {
+            pthread_mutex_unlock(&rb->mutex);
+            return false;
+        }
+    }
+    
+    if (rb->closed) {
+        pthread_mutex_unlock(&rb->mutex);
+        return false;
+    }
+    
+    void* dest = (uint8_t*)rb->buffer + (rb->write_pos * rb->elem_size);
+    memcpy(dest, elem, rb->elem_size);
+    
+    rb->write_pos = (rb->write_pos + 1) % rb->capacity;
+    
+    pthread_cond_signal(&rb->not_empty);
+    pthread_mutex_unlock(&rb->mutex);
+    
+    return true;
+}
+
+bool ringbuffer_read(ringbuffer_t* rb, void* elem, int timeout_ms) {
+    if (!rb || !elem) {
+        return false;
+    }
+    
+    pthread_mutex_lock(&rb->mutex);
+    
+    while (ringbuffer_is_empty(rb) && !rb->closed) {
+        if (!wait_for_condition(&rb->not_empty, &rb->mutex, timeout_ms)) {
+            pthread_mutex_unlock(&rb->mutex);
+            return false;
+        }
+    }
+    
+    if (ringbuffer_is_empty(rb) && rb->closed) {
+        pthread_mutex_unlock(&rb->mutex);
+        return false;
+    }
+    
+    void* src = (uint8_t*)rb->buffer + (rb->read_pos * rb->elem_size);
+    memcpy(elem, src, rb->elem_size);
+    
+    rb->read_pos = (rb->read_pos + 1) % rb->capacity;
+    
+    pthread_cond_signal(&rb->not_full);
+    pthread_mutex_unlock(&rb->mutex);
+    
+    return true;
+}
+
+size_t ringbuffer_size(ringbuffer_t* rb) {
+    if (!rb) {
+        return 0;
+    }
+    
+    pthread_mutex_lock(&rb->mutex);
+    size_t size;
+    if (rb->write_pos >= rb->read_pos) {
+        size = rb->write_pos - rb->read_pos;
+    } else {
+        size = rb->capacity - rb->read_pos + rb->write_pos;
+    }
+    pthread_mutex_unlock(&rb->mutex);
+    
+    return size;
+}
+
+bool ringbuffer_is_empty(ringbuffer_t* rb) {
+    if (!rb) {
+        return true;
+    }
+    return rb->read_pos == rb->write_pos;
+}
+
+bool ringbuffer_is_full(ringbuffer_t* rb) {
+    if (!rb) {
+        return false;
+    }
+    return ((rb->write_pos + 1) % rb->capacity) == rb->read_pos;
+}
+
+void ringbuffer_close(ringbuffer_t* rb) {
+    if (!rb) {
+        return;
+    }
+    
+    pthread_mutex_lock(&rb->mutex);
+    rb->closed = true;
+    pthread_cond_broadcast(&rb->not_empty);
+    pthread_cond_broadcast(&rb->not_full);
+    pthread_mutex_unlock(&rb->mutex);
+}
+
+/* src/core/frame.h - Video and audio frame definitions */
+#ifndef FRAME_H
+#define FRAME_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "videocapture.h"
+
+/* Video frame structure */
+typedef struct {
+    uint8_t* data[4];   /* Up to 4 planes for planar formats */
+    int linesize[4];    /* Line size for each plane */
+    int width;
+    int height;
+    vc_pixel_format_t format;
+    int64_t pts;        /* Presentation timestamp in microseconds */
+    bool keyframe;
+    void* opaque;       /* Platform-specific data */
+} video_frame_t;
+
+/* Audio frame structure */
+typedef struct {
+    uint8_t* data;
+    int size;
+    int sample_rate;
+    int channels;
+    vc_sample_format_t format;
+    int64_t pts;        /* Presentation timestamp in microseconds */
+    void* opaque;       /* Platform-specific data */
+} audio_frame_t;
+
+/* Allocate video frame */
+video_frame_t* video_frame_alloc(int width, int height, vc_pixel_format_t format);
+
+/* Free video frame */
+void video_frame_free(video_frame_t* frame);
+
+/* Deep copy video frame */
+video_frame_t* video_frame_clone(const video_frame_t* frame);
+
+/* Allocate audio frame */
+audio_frame_t* audio_frame_alloc(int size, int sample_rate, int channels, vc_sample_format_t format);
+
+/* Free audio frame */
+void audio_frame_free(audio_frame_t* frame);
+
+/* Deep copy audio frame */
+audio_frame_t* audio_frame_clone(const audio_frame_t* frame);
+
+#endif /* FRAME_H */
+
+/* src/core/frame.c - Video and audio frame implementation */
+#include "frame.h"
+#include <stdlib.h>
+#include <string.h>
+
+/* Helper to calculate plane sizes for different pixel formats */
+static void calculate_plane_sizes(int width, int height, vc_pixel_format_t format, 
+                                 int* num_planes, int linesize[4], int plane_heights[4]) {
+    *num_planes = 1;
+    linesize[0] = width;
+    plane_heights[0] = height;
+    
+    switch (format) {
+        case VC_PIXEL_FORMAT_RGB24:
+            linesize[0] = width * 3;
+            break;
+            
+        case VC_PIXEL_FORMAT_RGBA32:
+        case VC_PIXEL_FORMAT_BGRA32:
+            linesize[0] = width * 4;
+            break;
+            
+        case VC_PIXEL_FORMAT_YUV420P:
+            *num_planes = 3;
+            linesize[0] = width;
+            linesize[1] = width / 2;
+            linesize[2] = width / 2;
+            plane_heights[0] = height;
+            plane_heights[1] = height / 2;
+            plane_heights[2] = height / 2;
+            break;
+            
+        case VC_PIXEL_FORMAT_NV12:
+            *num_planes = 2;
+            linesize[0] = width;
+            linesize[1] = width;
+            plane_heights[0] = height;
+            plane_heights[1] = height / 2;
+            break;
+            
+        case VC_PIXEL_FORMAT_YUY2:
+            linesize[0] = width * 2;
+            break;
+            
+        default:
+            linesize[0] = width * 4; /* Default to RGBA */
+            break;
+    }
+}
+
+video_frame_t* video_frame_alloc(int width, int height, vc_pixel_format_t format) {
+    if (width <= 0 || height <= 0) {
+        return NULL;
+    }
+    
+    video_frame_t* frame = calloc(1, sizeof(video_frame_t));
+    if (!frame) {
+        return NULL;
+    }
+    
+    frame->width = width;
+    frame->height = height;
+    frame->format = format;
+    frame->pts = 0;
+    frame->keyframe = false;
+    frame->opaque = NULL;
+    
+    int num_planes;
+    int plane_heights[4] = {0};
+    calculate_plane_sizes(width, height, format, &num_planes, frame->linesize, plane_heights);
+    
+    for (int i = 0; i < num_planes; i++) {
+        size_t plane_size = frame->linesize[i] * plane_heights[i];
+        frame->data[i] = malloc(plane_size);
+        if (!frame->data[i]) {
+            video_frame_free(frame);
+            return NULL;
+        }
+    }
+    
+    return frame;
+}
+
+void video_frame_free(video_frame_t* frame) {
+    if (!frame) {
+        return;
+    }
+    
+    for (int i = 0; i < 4; i++) {
+        if (frame->data[i]) {
+            free(frame->data[i]);
+            frame->data[i] = NULL;
+        }
+    }
+    
+    free(frame);
+}
+
+video_frame_t* video_frame_clone(const video_frame_t* frame) {
+    if (!frame) {
+        return NULL;
+    }
+    
+    video_frame_t* new_frame = video_frame_alloc(frame->width, frame->height, frame->format);
+    if (!new_frame) {
+        return NULL;
+    }
+    
+    new_frame->pts = frame->pts;
+    new_frame->keyframe = frame->keyframe;
+    
+    int num_planes;
+    int plane_heights[4] = {0};
+    calculate_plane_sizes(frame->width, frame->height, frame->format, &num_planes, new_frame->linesize, plane_heights);
+    
+    for (int i = 0; i < num_planes; i++) {
+        if (frame->data[i] && new_frame->data[i]) {
+            size_t plane_size = new_frame->linesize[i] * plane_heights[i];
+            memcpy(new_frame->data[i], frame->data[i], plane_size);
+        }
+    }
+    
+    return new_frame;
+}
+
+audio_frame_t* audio_frame_alloc(int size, int sample_rate, int channels, vc_sample_format_t format) {
+    if (size <= 0 || sample_rate <= 0 || channels <= 0) {
+        return NULL;
+    }
+    
+    audio_frame_t* frame = calloc(1, sizeof(audio_frame_t));
+    if (!frame) {
+        return NULL;
+    }
+    
+    frame->data = malloc(size);
+    if (!frame->data) {
+        free(frame);
+        return NULL;
+    }
+    
+    frame->size = size;
+    frame->sample_rate = sample_rate;
+    frame->channels = channels;
+    frame->format = format;
+    frame->pts = 0;
+    frame->opaque = NULL;
+    
+    return frame;
+}
+
+void audio_frame_free(audio_frame_t* frame) {
+    if (!frame) {
+        return;
+    }
+    
+    if (frame->data) {
+        free(frame->data);
+        frame->data = NULL;
+    }
+    
+    free(frame);
+}
+
+audio_frame_t* audio_frame_clone(const audio_frame_t* frame) {
+    if (!frame) {
+        return NULL;
+    }
+    
+    audio_frame_t* new_frame = audio_frame_alloc(frame->size, frame->sample_rate, 
+                                               frame->channels, frame->format);
+    if (!new_frame) {
+        return NULL;
+    }
+    
+    new_frame->pts = frame->pts;
+    
+    if (frame->data && new_frame->data) {
+        memcpy(new_frame->data, frame->data, frame->size);
+    }
+    
+    return new_frame;
+}
+
+/* src/core/module.h - Module interface definitions */
+#ifndef MODULE_H
+#define MODULE_H
+
+#include <stdint.h>
+#include "videocapture.h"
+
+/* Module types */
+typedef enum {
+    MODULE_TYPE_DISPLAY_DRIVER = 0,
+    MODULE_TYPE_VIDEO_CAPTURE,
+    MODULE_TYPE_AUDIO_CAPTURE,
+    MODULE_TYPE_SYNC,
+    MODULE_TYPE_ENCODER,
+    MODULE_TYPE_MUXER
+} module_type_t;
+
+/* Module status */
+typedef enum {
+    MODULE_STATUS_UNINITIALIZED = 0,
+    MODULE_STATUS_INITIALIZED,
+    MODULE_STATUS_RUNNING,
+    MODULE_STATUS_PAUSED,
+    MODULE_STATUS_STOPPED,
+    MODULE_STATUS_ERROR
+} module_status_t;
+
+/* Forward declarations */
+struct module_ctx;
+typedef struct module_ctx module_ctx_t;
+
+/* Module operations */
+typedef struct {
+    const char* name;
+    module_type_t type;
+    
+    /* Initialize the module with a JSON configuration string */
+    vc_result_t (*init)(module_ctx_t* ctx, const char* config_json);
+    
+    /* Start the module */
+    vc_result_t (*start)(module_ctx_t* ctx);
+    
+    /* Stop the module */
+    vc_result_t (*stop)(module_ctx_t* ctx);
+    
+    /* Pause the module */
+    vc_result_t (*pause)(module_ctx_t* ctx);
+    
+    /* Resume the module */
+    vc_result_t (*resume)(module_ctx_t* ctx);
+    
+    /* Process a frame through the module */
+    vc_result_t (*process)(module_ctx_t* ctx, void* in_frame, void* out_frame);
+    
+    /* Flush any buffered data */
+    vc_result_t (*flush)(module_ctx_t* ctx);
+    
+    /* Clean up resources */
+    void (*destroy)(module_ctx_t* ctx);
+} module_ops_t;
+
+/* Module context */
+struct module_ctx {
+    void* private_data;
+    module_ops_t* ops;
+    module_status_t status;
+    char error_message[256];
+    ringbuffer_t* input_queue;
+    ringbuffer_t* output_queue;
+};
+
+/* Create a new module context */
+module_ctx_t* module_create(module_ops_t* ops);
+
+/* Destroy a module context */
+void module_destroy(module_ctx_t* ctx);
+
+/* Set an error message */
+void module_set_error(module_ctx_t* ctx, const char* fmt, ...);
+
+/* Get the module's error message */
+const char* module_get_error(module_ctx_t* ctx);
+
+/* Connect two modules together */
+vc_result_t module_connect(module_ctx_t* producer, module_ctx_t* consumer, size_t queue_size);
+
+#endif /* MODULE_H */
+
+/* src/core/module.c - Module interface implementation */
+#include "module.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include "ringbuffer.h"
+
+module_ctx_t* module_create(module_ops_t* ops) {
+    if (!ops) {
+        return NULL;
+    }
+    
+    module_ctx_t* ctx = calloc(1, sizeof(module_ctx_t));
+    if (!ctx) {
+        return NULL;
+    }
+    
+    ctx->ops = ops;
+    ctx->status = MODULE_STATUS_UNINITIALIZED;
+    ctx->error_message[0] = '\0';
+    
+    return ctx;
+}
+
+void module_destroy(module_ctx_t* ctx) {
+    if (!ctx) {
+        return;
+    }
+    
+    if (ctx->status != MODULE_STATUS_UNINITIALIZED && 
+        ctx->status != MODULE_STATUS_STOPPED && 
+        ctx->ops && ctx->ops->stop) {
+        ctx->ops->stop(ctx);
+    }
+    
+    if (ctx->ops && ctx->ops->destroy) {
+        ctx->ops->destroy(ctx);
+    }
+    
+    if (ctx->input_queue) {
+        ringbuffer_free(ctx->input_queue);
+        free(ctx->input_queue);
+        ctx->input_queue = NULL;
+    }
+    
+    if (ctx->output_queue) {
+        ringbuffer_free(ctx->output_queue);
+        free(ctx->output_queue);
+        ctx->output_queue = NULL;
+    }
+    
+    free(ctx);
+}
+
+void module_set_error(module_ctx_t* ctx, const char* fmt, ...) {
+    if (!ctx || !fmt) {
+        return;
+    }
+    
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(ctx->error_message, sizeof(ctx->error_message), fmt, args);
+    va_end(args);
+    
+    ctx->status = MODULE_STATUS_ERROR;
+}
+
+const char* module_get_error(module_ctx_t* ctx) {
+    if (!ctx) {
+        return "Invalid module context";
+    }
+    
+    return ctx->error_message;
+}
+
+vc_result_t module_connect(module_ctx_t* producer, module_ctx_t* consumer, size_t queue_size) {
+    if (!producer || !consumer) {
+        return VC_ERROR_INVALID_PARAM;
+    }
+    
+    if (queue_size == 0) {
+        queue_size = 32; /* Default queue size */
+    }
+    
+    ringbuffer_t* rb = calloc(1, sizeof(ringbuffer_t));
+    if (!rb) {
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    /* Determine element size based on module types */
+    size_t elem_size = 0;
+    
+    switch (producer->ops->type) {
+        case MODULE_TYPE_DISPLAY_DRIVER:
+        case MODULE_TYPE_VIDEO_CAPTURE:
+            elem_size = sizeof(video_frame_t*);
+            break;
+            
+        case MODULE_TYPE_AUDIO_CAPTURE:
+            elem_size = sizeof(audio_frame_t*);
+            break;
+            
+        case MODULE_TYPE_SYNC:
+            /* Sync module can output either video or audio frames */
+            if (consumer->ops->type == MODULE_TYPE_ENCODER) {
+                /* Determine based on encoder type (would need additional info) */
+                elem_size = sizeof(void*); /* Generic pointer size */
+            }
+            break;
+            
+        case MODULE_TYPE_ENCODER:
+            /* Encoded packet size */
+            elem_size = 1024; /* Arbitrary size for encoded packets */
+            break;
+            
+        default:
+            elem_size = sizeof(void*);
+            break;
+    }
+    
+    if (!ringbuffer_init(rb, queue_size, elem_size)) {
+        free(rb);
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    /* Connect the modules */
+    producer->output_queue = rb;
+    consumer->input_queue = rb;
+    
+    return VC_SUCCESS;
+}
+
+/* src/sync/sync_module.h - A/V synchronization module */
+#ifndef SYNC_MODULE_H
+#define SYNC_MODULE_H
+
+#include "../core/module.h"
+#include "../core/frame.h"
+#include <pthread.h>
+
+/* Sync module private data */
+typedef struct {
+    int64_t base_time;
+    int64_t video_base_pts;
+    int64_t audio_base_pts;
+    int64_t last_video_pts;
+    int64_t last_audio_pts;
+    double audio_drift_threshold_ms;
+    double video_time_base;
+    double audio_time_base;
+    pthread_mutex_t mutex;
+    pthread_t thread;
+    volatile bool running;
+    ringbuffer_t* video_queue;
+    ringbuffer_t* audio_queue;
+} sync_data_t;
+
+/* Initialize sync module */
+vc_result_t sync_init(module_ctx_t* ctx, const char* config_json);
+
+/* Start sync module */
+vc_result_t sync_start(module_ctx_t* ctx);
+
+/* Stop sync module */
+vc_result_t sync_stop(module_ctx_t* ctx);
+
+/* Process a frame through the sync module */
+vc_result_t sync_process(module_ctx_t* ctx, void* in_frame, void* out_frame);
+
+/* Clean up sync module */
+void sync_destroy(module_ctx_t* ctx);
+
+/* Get the module operations structure */
+module_ops_t* sync_get_ops(void);
+
+#endif /* SYNC_MODULE_H */
+
+/* src/sync/sync_module.c - A/V synchronization module implementation */
+#include "sync_module.h"
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <json-c/json.h>
+
+/* Get current time in microseconds */
+static int64_t get_current_time_us() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
+}
+
+/* Main sync thread function */
+static void* sync_thread_func(void* arg) {
+    module_ctx_t* ctx = (module_ctx_t*)arg;
+    sync_data_t* sync = (sync_data_t*)ctx->private_data;
+    
+    video_frame_t* video_frame = NULL;
+    audio_frame_t* audio_frame = NULL;
+    
+    int64_t next_video_pts = 0;
+    int64_t next_audio_pts = 0;
+    
+    while (sync->running) {
+        /* Process video frames */
+        if (!video_frame && ringbuffer_read(sync->video_queue, &video_frame, 0)) {
+            if (sync->video_base_pts == 0) {
+                sync->video_base_pts = video_frame->pts;
+                if (sync->base_time == 0) {
+                    sync->base_time = get_current_time_us();
+                }
+            }
+            
+            next_video_pts = video_frame->pts - sync->video_base_pts + sync->base_time;
+        }
+        
+        /* Process audio frames */
+        if (!audio_frame && ringbuffer_read(sync->audio_queue, &audio_frame, 0)) {
+            if (sync->audio_base_pts == 0) {
+                sync->audio_base_pts = audio_frame->pts;
+                if (sync->base_time == 0) {
+                    sync->base_time = get_current_time_us();
+                }
+            }
+            
+            next_audio_pts = audio_frame->pts - sync->audio_base_pts + sync->base_time;
+        }
+        
+        /* If we have both frames, check synchronization */
+        if (video_frame && audio_frame) {
+            int64_t current_time = get_current_time_us();
+            int64_t video_delta = next_video_pts - current_time;
+            int64_t audio_delta = next_audio_pts - current_time;
+            int64_t av_diff = next_video_pts - next_audio_pts;
+            
+            /* Check if audio and video are out of sync beyond threshold */
+            if (llabs(av_diff) > sync->audio_drift_threshold_ms * 1000) {
+                /* Adjust timestamps to maintain sync */
+                if (av_diff > 0) {
+                    /* Video is ahead of audio, adjust video PTS */
+                    next_video_pts = next_audio_pts;
+                    video_frame->pts = next_video_pts - sync->base_time + sync->video_base_pts;
+                } else {
+                    /* Audio is ahead of video, adjust audio PTS */
+                    next_audio_pts = next_video_pts;
+                    audio_frame->pts = next_audio_pts - sync->base_time + sync->audio_base_pts;
+                }
+            }
+            
+            /* Output frames in the correct order */
+            int64_t min_pts = (next_video_pts < next_audio_pts) ? next_video_pts : next_audio_pts;
+            if (current_time >= min_pts) {
+                if (next_video_pts == min_pts) {
+                    /* Output video frame */
+                    if (ctx->output_queue) {
+                        ringbuffer_write(ctx->output_queue, &video_frame, 100);
+                    }
+                    sync->last_video_pts = video_frame->pts;
+                    video_frame = NULL;
+                } else {
+                    /* Output audio frame */
+                    if (ctx->output_queue) {
+                        ringbuffer_write(ctx->output_queue, &audio_frame, 100);
+                    }
+                    sync->last_audio_pts = audio_frame->pts;
+                    audio_frame = NULL;
+                }
+            } else {
+                /* Wait until it's time to output the next frame */
+                usleep(1000); /* 1ms sleep */
+            }
+        } else {
+            /* Not enough frames, wait a bit */
+            usleep(1000);
+        }
+    }
+    
+    /* Clean up remaining frames */
+    if (video_frame) {
+        video_frame_free(video_frame);
+    }
+    
+    if (audio_frame) {
+        audio_frame_free(audio_frame);
+    }
+    
+    return NULL;
+}
+
+vc_result_t sync_init(module_ctx_t* ctx, const char* config_json) {
+    if (!ctx) {
+        return VC_ERROR_INVALID_PARAM;
+    }
+    
+    sync_data_t* sync = calloc(1, sizeof(sync_data_t));
+    if (!sync) {
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    /* Default values */
+    sync->audio_drift_threshold_ms = 40.0; /* 40ms default threshold */
+    sync->video_time_base = 1.0 / 30.0;   /* 30 fps default */
+    sync->audio_time_base = 1.0 / 48000.0; /* 48kHz default */
+    
+    /* Parse configuration if provided */
+    if (config_json) {
+        json_object* jobj = json_tokener_parse(config_json);
+        if (jobj) {
+            json_object* value;
+            
+            if (json_object_object_get_ex(jobj, "audio_drift_threshold_ms", &value)) {
+                sync->audio_drift_threshold_ms = json_object_get_double(value);
+            }
+            
+            if (json_object_object_get_ex(jobj, "video_time_base", &value)) {
+                sync->video_time_base = json_object_get_double(value);
+            }
+            
+            if (json_object_object_get_ex(jobj, "audio_time_base", &value)) {
+                sync->audio_time_base = json_object_get_double(value);
+            }
+            
+            json_object_put(jobj);
+        }
+    }
+    
+    /* Initialize queues */
+    sync->video_queue = calloc(1, sizeof(ringbuffer_t));
+    sync->audio_queue = calloc(1, sizeof(ringbuffer_t));
+    
+    if (!sync->video_queue || !sync->audio_queue) {
+        if (sync->video_queue) free(sync->video_queue);
+        if (sync->audio_queue) free(sync->audio_queue);
+        free(sync);
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    if (!ringbuffer_init(sync->video_queue, 60, sizeof(video_frame_t*)) ||
+        !ringbuffer_init(sync->audio_queue, 120, sizeof(audio_frame_t*))) {
+        ringbuffer_free(sync->video_queue);
+        ringbuffer_free(sync->audio_queue);
+        free(sync->video_queue);
+        free(sync->audio_queue);
+        free(sync);
+        return VC_ERROR_OUT_OF_MEMORY;
+    }
+    
+    /* Initialize mutex */
+    if (pthread_mutex_init(&sync->mutex, NULL) != 0) {
+        ringbuffer_free(sync->video_queue);
+        ringbuffer_free(sync->audio_queue);
+        free(sync->video_queue);
+        free(sync->audio_queue);
+        free(sync);
+        return VC_ERROR_UNKNOWN;
+    }
+    
+    ctx->private_data = sync;
+    ctx->status = MODULE_STATUS_INITIALIZED;
+    
+    return VC_SUCCESS;
+}
+
+vc_result_t sync_start(module_ctx_t* ctx) {
+    if (!ctx || !ctx->private_data) {
+        return VC_ERROR_NOT_INITIALIZED;
+    }
+    
+    sync_data_t* sync = (sync_data_t*)ctx->private_data;
+    
+    if (ctx->status == MODULE_STATUS_RUNNING) {
+        return VC_ERROR_ALREADY_INITIALIZED;
+    }
+    
+    sync->running = true;
+    
+    /* Start sync thread */
+    if (pthread_create(&sync->thread, NULL, sync_thread_func, ctx) != 0) {
+        sync->running = false;
+        module_set_error(ctx, "Failed to create sync thread");
+        return VC_ERROR_UNKNOWN;
+    }
+    
+    ctx->status = MODULE_STATUS_RUNNING;
+    
+    return VC_SUCCESS;
+}
+
+vc_result_t sync_stop(module_ctx_t* ctx) {
+    if (!ctx || !ctx->private_data) {
+        return VC_ERROR_NOT_INITIALIZED;
+    }
+    
+    sync_data_t* sync = (sync_data_t*)ctx->private_data;
+    
+    if (ctx->status != MODULE_STATUS_RUNNING) {
+        return VC_SUCCESS;
+    }
+    
+    sync->running = false;
+    
+    /* Wait for thread to finish */
+    pthread_join(sync->thread, NULL);
+    
+    ctx->status = MODULE_STATUS_STOPPED;
+    
+    return VC_SUCCESS;
+}
+
+vc_result_t sync_process(module_ctx_t* ctx, void* in_frame, void* out_frame) {
+    if (!ctx || !ctx->private_data || !in_frame) {
+        return VC_ERROR_INVALID_PARAM;
+    }
+    
+    sync_data_t* sync = (sync_data_t*)ctx->private_data;
+    
+    /* Check frame type and add to appropriate queue */
+    if (*(void**)in_frame) {
+        void* frame_ptr = *(void**)in_frame;
+        
+        /* Detect frame type - this is a simplified approach */
+        /* In a real implementation, we'd have a proper way to identify frame types */
+        if (((uintptr_t)frame_ptr & 1) == 0) {
+            /* Even address - assume video frame */
+            ringbuffer_write(sync->video_queue, &frame_ptr, 100);
+        } else {
+            /* Odd address - assume audio frame */
+            ringbuffer_write(sync->audio_queue, &frame_ptr, 100);
+        }
+    }
+    
+    return VC_SUCCESS;
+}
+
+void sync_destroy(module_ctx_t* ctx) {
+    if (!ctx || !ctx->private_data) {
+        return;
+    }
+    
+    sync_data_t* sync = (sync_data_t*)ctx->private_data;
+    
+    /* Stop if running */
+    if (ctx->status == MODULE_STATUS_RUNNING) {
+        sync_stop(ctx);
+    }
+    
+    /* Clean up resources */
+    pthread_mutex_destroy(&sync->mutex);
+    
+    ringbuffer_free(sync->video_queue);
+    ringbuffer_free(sync->audio_queue);
+    free(sync->video_queue);
+    free(sync->audio_queue);
+    
+    free(sync);
+    ctx->private_data = NULL;
+}
+
+static module_ops_t sync_ops = {
+    .name = "sync",
+    .type = MODULE_TYPE_SYNC,
+    .init = sync_init,
+    .start = sync_start,
+    .stop = sync_stop,
+    .process = sync_process,
+    .destroy = sync_destroy
+};
+
+module_ops_t* sync_get_ops(void) {
+    return &sync_ops;
+}
+
+/* src/encoder/encoder_module.h - Encoder module */
+#ifndef ENCODER_MODULE_H
+#define ENCODER_MODULE_H
+
+#include "../core/module.h"
+#include <libavcodec/avcodec.h>
+#include <libavutil/avutil.h>
+#include <pthread.h>
+
+/* Encoder module private data */
+typedef struct {
+    /* Video encoder */
+    AVCodecContext* video_codec_ctx;
+    AVFrame* video_frame;
+    AVPacket* video_packet;
+    
+    /* Audio encoder */
+    AVCodecContext* audio_codec_ctx;
+    AVFrame* audio_frame;
+    AVPacket* audio_packet;
+    
+    /* Configuration */
+    vc_video_codec_t video_codec;
+    int video_bitrate;
+    int gop_size;
+    int width;
+    int height;
+    int fps;
+    
+    vc_audio_codec_t audio_codec;
+    int audio_bitrate;
+    int sample_rate;
+    int channels;
+    
+    vc_hw_accel_t hw_accel;
+    AVBufferRef* hw_device_ctx;
+    
+    pthread_t thread;
+    volatile bool running;
+    pthread_mutex_t mutex;
+} encoder_data_t;
+
+/* Initialize encoder module */
+vc_result_t encoder_init(module_ctx_t* ctx, const char* config_json);
+
+/* Start encoder module */
+vc_result_t encoder_start(module_ctx_t* ctx);
+
+/* Stop encoder module */
+vc_result_t encoder_stop(module_ctx_t* ctx);
+
+/* Process a frame through the encoder module */
+vc_result_t encoder_process(module_ctx_t* ctx, void* in_frame, void* out_frame);
+
+/* Clean up encoder module */
+void encoder_destroy(module_ctx_t* ctx);
+
+/* Get the module operations structure */
+module_ops_t* encoder_get_ops(void);
+
+#endif /* ENCODER_MODULE_H */
