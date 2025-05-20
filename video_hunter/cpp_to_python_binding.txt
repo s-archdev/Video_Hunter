@@ -1,0 +1,140 @@
+// VideoDownloaderPythonBinding.cpp
+// This file creates the necessary bindings for Python to interact with our C++ library
+
+#include "VideoDownloader.hpp"
+#include <vector>
+#include <cstring>
+
+#ifdef _WIN32
+    #define EXPORT __declspec(dllexport)
+#else
+    #define EXPORT __attribute__((visibility("default")))
+#endif
+
+extern "C" {
+    // Create and destroy VideoDownloader instance
+    EXPORT void* VideoDownloader_Create() {
+        return new VideoDownloader();
+    }
+
+    EXPORT void VideoDownloader_Destroy(void* instance) {
+        delete static_cast<VideoDownloader*>(instance);
+    }
+
+    // Function pointer type for progress callback
+    typedef void (*ProgressCallback)(double progress);
+
+    // Wrapper struct to hold both the Python callback and user data
+    struct CallbackData {
+        ProgressCallback callback;
+        void* userData;
+    };
+
+    // C++ progress callback that calls the Python callback
+    void cpp_progress_callback(double progress, void* userData) {
+        CallbackData* data = static_cast<CallbackData*>(userData);
+        if (data && data->callback) {
+            data->callback(progress);
+        }
+    }
+
+    // Download video function
+    EXPORT bool VideoDownloader_DownloadVideo(void* instance, 
+                                             const char* url, 
+                                             const char* outputPath,
+                                             ProgressCallback callback,
+                                             void* userData) {
+        VideoDownloader* downloader = static_cast<VideoDownloader*>(instance);
+        
+        if (callback) {
+            // Create callback data
+            CallbackData data = { callback, userData };
+            
+            // Create C++ callback that will call the Python callback
+            std::function<void(double)> cppCallback = [&data](double progress) {
+                cpp_progress_callback(progress, &data);
+            };
+            
+            return downloader->downloadVideo(url, outputPath, cppCallback);
+        } else {
+            return downloader->downloadVideo(url, outputPath);
+        }
+    }
+
+    // Get available formats
+    EXPORT void VideoDownloader_GetAvailableFormats(void* instance, 
+                                                   const char* url, 
+                                                   char*** formatsOut, 
+                                                   int* countOut) {
+        VideoDownloader* downloader = static_cast<VideoDownloader*>(instance);
+        std::vector<std::string> formats = downloader->getAvailableFormats(url);
+        
+        // Allocate memory for the array of strings
+        *countOut = static_cast<int>(formats.size());
+        *formatsOut = static_cast<char**>(malloc(sizeof(char*) * formats.size()));
+        
+        // Copy each format string
+        for (size_t i = 0; i < formats.size(); i++) {
+            (*formatsOut)[i] = strdup(formats[i].c_str());
+        }
+    }
+
+    // Free formats array
+    EXPORT void VideoDownloader_FreeFormats(char** formats, int count) {
+        for (int i = 0; i < count; i++) {
+            free(formats[i]);
+        }
+        free(formats);
+    }
+
+    // Set preferred format
+    EXPORT void VideoDownloader_SetPreferredFormat(void* instance, const char* formatName) {
+        VideoDownloader* downloader = static_cast<VideoDownloader*>(instance);
+        downloader->setPreferredFormat(formatName);
+    }
+
+    // Set preferred quality
+    EXPORT void VideoDownloader_SetPreferredQuality(void* instance, const char* quality) {
+        VideoDownloader* downloader = static_cast<VideoDownloader*>(instance);
+        downloader->setPreferredQuality(quality);
+    }
+
+    // Get last error
+    EXPORT const char* VideoDownloader_GetLastError(void* instance) {
+        VideoDownloader* downloader = static_cast<VideoDownloader*>(instance);
+        // Note: The caller should not free this memory
+        static std::string lastError;
+        lastError = downloader->getLastError();
+        return lastError.c_str();
+    }
+
+    // Get version
+    EXPORT const char* VideoDownloader_GetVersion() {
+        static std::string version = VideoDownloader::getVersion();
+        return version.c_str();
+    }
+}
+
+// CMakeLists.txt additions for the Python binding
+/*
+# Python binding
+add_library(videodownloader_python SHARED VideoDownloaderPythonBinding.cpp)
+target_link_libraries(videodownloader_python videodownloader)
+
+# Installation for Python binding
+if(WIN32)
+    set_target_properties(videodownloader_python PROPERTIES 
+                         OUTPUT_NAME "videodownloader" 
+                         SUFFIX ".dll")
+elseif(APPLE)
+    set_target_properties(videodownloader_python PROPERTIES 
+                         OUTPUT_NAME "videodownloader" 
+                         SUFFIX ".dylib")
+else()
+    set_target_properties(videodownloader_python PROPERTIES 
+                         OUTPUT_NAME "videodownloader" 
+                         SUFFIX ".so")
+endif()
+
+install(TARGETS videodownloader_python DESTINATION lib)
+*/

@@ -1,0 +1,213 @@
+// VideoDownloader.hpp
+#pragma once
+
+#include <string>
+#include <vector>
+#include <functional>
+#include <memory>
+
+class VideoDownloaderImpl;
+
+/**
+ * VideoDownloader - A C++ library for downloading video content from URLs
+ */
+class VideoDownloader {
+public:
+    VideoDownloader();
+    ~VideoDownloader();
+
+    /**
+     * Download a video from a URL to a local file
+     *
+     * @param url Source URL of the video
+     * @param outputPath Local path where the video will be saved
+     * @param progressCallback Optional callback to monitor download progress (0.0 to 1.0)
+     * @return true if download was successful, false otherwise
+     */
+    bool downloadVideo(const std::string& url, 
+                       const std::string& outputPath,
+                       std::function<void(double)> progressCallback = nullptr);
+
+    /**
+     * Get available video formats from a URL
+     *
+     * @param url Source URL to check for video formats
+     * @return Vector of format descriptions (e.g. "mp4-720p", "webm-1080p")
+     */
+    std::vector<std::string> getAvailableFormats(const std::string& url);
+
+    /**
+     * Set preferred video format
+     *
+     * @param formatName Format identifier (e.g. "mp4", "webm")
+     */
+    void setPreferredFormat(const std::string& formatName);
+
+    /**
+     * Set preferred video quality
+     *
+     * @param quality Quality identifier (e.g. "720p", "1080p")
+     */
+    void setPreferredQuality(const std::string& quality);
+
+    /**
+     * Get last error message if a download failed
+     *
+     * @return Error message
+     */
+    std::string getLastError() const;
+
+    /**
+     * Get library version
+     *
+     * @return Version string
+     */
+    static std::string getVersion();
+
+private:
+    std::unique_ptr<VideoDownloaderImpl> pImpl;
+};
+
+// VideoDownloader.cpp
+#include "VideoDownloader.hpp"
+#include <curl/curl.h>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <regex>
+#include <cstring>
+
+class VideoDownloaderImpl {
+public:
+    VideoDownloaderImpl() : 
+        preferredFormat("mp4"),
+        preferredQuality("720p"),
+        lastError("") {
+        curl_global_init(CURL_GLOBAL_ALL);
+    }
+
+    ~VideoDownloaderImpl() {
+        curl_global_cleanup();
+    }
+
+    std::string preferredFormat;
+    std::string preferredQuality;
+    std::string lastError;
+
+    // Curl callback for writing data to file
+    static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+        size_t realSize = size * nmemb;
+        std::ofstream* file = static_cast<std::ofstream*>(userp);
+        file->write(static_cast<char*>(contents), realSize);
+        return realSize;
+    }
+
+    // Curl callback for progress monitoring
+    static int progressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+        if (dltotal == 0) return 0;  // Avoid division by zero
+        
+        auto callback = *static_cast<std::function<void(double)>*>(clientp);
+        double progress = static_cast<double>(dlnow) / static_cast<double>(dltotal);
+        callback(progress);
+        return 0;
+    }
+};
+
+VideoDownloader::VideoDownloader() : pImpl(new VideoDownloaderImpl()) {}
+
+VideoDownloader::~VideoDownloader() = default;
+
+bool VideoDownloader::downloadVideo(const std::string& url, 
+                                   const std::string& outputPath,
+                                   std::function<void(double)> progressCallback) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        pImpl->lastError = "Failed to initialize CURL";
+        return false;
+    }
+
+    std::ofstream outFile(outputPath, std::ios::binary);
+    if (!outFile) {
+        pImpl->lastError = "Failed to open output file: " + outputPath;
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, VideoDownloaderImpl::writeCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outFile);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);  // For testing purposes only
+
+    // User agent to avoid some site restrictions
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "VideoDownloader/1.0");
+
+    // Setup progress monitoring if callback provided
+    if (progressCallback) {
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, VideoDownloaderImpl::progressCallback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressCallback);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    outFile.close();
+
+    if (res != CURLE_OK) {
+        pImpl->lastError = curl_easy_strerror(res);
+        return false;
+    }
+
+    return true;
+}
+
+std::vector<std::string> VideoDownloader::getAvailableFormats(const std::string& url) {
+    // This is a simplified implementation
+    // A real implementation would analyze the URL and extract available formats
+    // For now, we'll return some common formats
+    
+    std::vector<std::string> formats;
+    formats.push_back("mp4-360p");
+    formats.push_back("mp4-720p");
+    formats.push_back("mp4-1080p");
+    formats.push_back("webm-360p");
+    formats.push_back("webm-720p");
+    formats.push_back("webm-1080p");
+    
+    return formats;
+}
+
+void VideoDownloader::setPreferredFormat(const std::string& formatName) {
+    pImpl->preferredFormat = formatName;
+}
+
+void VideoDownloader::setPreferredQuality(const std::string& quality) {
+    pImpl->preferredQuality = quality;
+}
+
+std::string VideoDownloader::getLastError() const {
+    return pImpl->lastError;
+}
+
+std::string VideoDownloader::getVersion() {
+    return "VideoDownloader 1.0.0";
+}
+
+// CMakeLists.txt for compiling the library
+/*
+cmake_minimum_required(VERSION 3.10)
+project(VideoDownloader VERSION 1.0.0)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(CURL REQUIRED)
+include_directories(${CURL_INCLUDE_DIRS})
+
+add_library(videodownloader SHARED VideoDownloader.cpp)
+target_link_libraries(videodownloader ${CURL_LIBRARIES})
+
+# Install library
+install(TARGETS videodownloader DESTINATION lib)
+install(FILES VideoDownloader.hpp DESTINATION include)
+*/
