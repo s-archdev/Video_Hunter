@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --success-color: #10b981;
+            --error-color: #ef4444;
+            --text-color: #1f2937;
+            --light-bg: #f9fafb;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            color: var(--text-color);
+            background-color: var(--light-bg);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="url"],
+        select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus,
+        input[type="url"]:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+
+        button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 10px;
+            background-color: #e5e7eb;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+
+        .info-box {
+            border-left: 4px solid var(--primary-color);
+            background-color: rgba(37, 99, 235, 0.1);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .formats-container {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .format-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            background-color: #f3f4f6;
+            border-radius: 4px;
+        }
+
+        .format-item input[type="radio"] {
+            margin-right: 1rem;
+        }
+
+        .status {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .status.success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success-color);
+            color: var(--success-color);
+        }
+
+        .status.error {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">📹</div>
+            <h1>Video Downloader</h1>
+            <p>Download videos from various sources with our proprietary software</p>
+        </header>
+
+        <div class="card">
+            <div class="info-box">
+                <p>Enter the URL of the video you want to download. Our system will analyze the URL and show you available download options.</p>
+            </div>
+
+            <form id="downloadForm">
+                <div class="form-group">
+                    <label for="videoUrl">Video URL</label>
+                    <input type="url" id="videoUrl" name="videoUrl" placeholder="https://example.com/video" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="outputFilename">Output Filename</label>
+                    <input type="text" id="outputFilename" name="outputFilename" placeholder="my-video">
+                </div>
+
+                <div class="formats-container" id="formatsContainer">
+                    <h3>Available Formats</h3>
+                    <div id="formatsList"></div>
+                </div>
+
+                <div class="form-group">
+                    <button type="button" id="analyzeButton">Analyze URL</button>
+                    <button type="button" id="downloadButton" disabled>Download Video</button>
+                </div>
+
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">0%</div>
+                </div>
+
+                <div class="status" id="statusMessage"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // VideoDownloader Web Interface
+        document.addEventListener('DOMContentLoaded', function() {
+            const analyzeButton = document.getElementById('analyzeButton');
+            const downloadButton = document.getElementById('downloadButton');
+            const videoUrl = document.getElementById('videoUrl');
+            const outputFilename = document.getElementById('outputFilename');
+            const formatsContainer = document.getElementById('formatsContainer');
+            const formatsList = document.getElementById('formatsList');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const statusMessage = document.getElementById('statusMessage');
+
+            // Mock available formats for demonstration
+            const mockFormats = [
+                'mp4-360p',
+                'mp4-720p',
+                'mp4-1080p',
+                'webm-360p',
+                'webm-720p',
+                'webm-1080p'
+            ];
+
+            // Analyze URL button click handler
+            analyzeButton.addEventListener('click', async function() {
+                if (!videoUrl.value) {
+                    showError('Please enter a valid video URL');
+                    return;
+                }
+
+                try {
+                    // Show loading state
+                    analyzeButton.disabled = true;
+                    analyzeButton.textContent = 'Analyzing...';
+                    
+                    // In a real implementation, we would call the backend API
+                    // For demonstration, we'll use mock data and simulate a delay
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    // Generate default filename from URL if not provided
+                    if (!outputFilename.value) {
+                        const urlObj = new URL(videoUrl.value);
+                        const pathParts = urlObj.pathname.split('/');
+                        const lastPart = pathParts[pathParts.length - 1];
+                        outputFilename.value = lastPart.split('.')[0] || 'video';
+                    }
+                    
+                    // Display format options
+                    formatsList.innerHTML = '';
+                    mockFormats.forEach((format, index) => {
+                        const formatItem = document.createElement('div');
+                        formatItem.className = 'format-item';
+                        formatItem.innerHTML = `
+                            <input type="radio" name="format" id="format${index}" value="${format}" ${index === 1 ? 'checked' : ''}>
+                            <label for="format${index}">${format}</label>
+                        `;
+                        formatsList.appendChild(formatItem);
+                    });
+                    
+                    formatsContainer.style.display = 'block';
+                    downloadButton.disabled = false;
+                    
+                    showSuccess('URL analyzed successfully! Select a format and click Download.');
+                } catch (error) {
+                    showError('Failed to analyze URL: ' + error.message);
+                } finally {
+                    analyzeButton.disabled = false;
+                    analyzeButton.textContent = 'Analyze URL';
+                }
+            });
+            
+            // Download button click handler
+            downloadButton.addEventListener('click', async function() {
+                try {
+                    // Get selected format
+                    const selectedFormat = document.querySelector('input[name="format"]:checked');
+                    if (!selectedFormat) {
+                        showError('Please select a format');
+                        return;
+                    }
+                    
+                    // Prepare download parameters
+                    const params = {
+                        url: videoUrl.value,
+                        format: selectedFormat.value,
+                        filename: outputFilename.value
+                    };
+                    
+                    // Show loading state
+                    downloadButton.disabled = true;
+                    downloadButton.textContent = 'Starting Download...';
+                    
+                    // Reset and show progress bar
+                    progressFill.style.width = '0%';
+                    progressText.textContent = '0%';
+                    progressContainer.style.display = 'block';
+                    
+                    // In a real implementation, we would call the backend API
+                    // For demonstration, we'll simulate download progress
+                    let progress = 0;
+                    const interval = setInterval(() => {
+                        progress += Math.random() * 5;
+                        if (progress >= 100) {
+                            progress = 100;
+                            clearInterval(interval);
+                            
+                            // Simulate download completion
+                            setTimeout(() => {
+                                downloadButton.textContent = 'Download Video';
+                                downloadButton.disabled = false;
+                                showSuccess('Download completed successfully!');
+                            }, 500);
+                        }
+                        
+                        const progressPercent = Math.min(Math.round(progress), 100);
+                        progressFill.style.width = `${progressPercent}%`;
+                        progressText.textContent = `${progressPercent}%`;
+                        downloadButton.textContent = `Downloading... ${progressPercent}%`;
+                    }, 200);
+                    
+                } catch (error) {
+                    showError('Download failed: ' + error.message);
+                    downloadButton.disabled = false;
+                    downloadButton.textContent = 'Download Video';
+                }
+            });
+            
+            // Helper function to show success message
+            function showSuccess(message) {
+                statusMessage.className = 'status success';
+                statusMessage.textContent = message;
+                statusMessage.style.display = 'block';
+            }
+            
+            // Helper function to show error message
+            function showError(message) {
+                statusMessage.className = 'status error';
+                statusMessage.textContent = message;
+                statusMessage.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
