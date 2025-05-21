@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple YouTube Repeater</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #ff0000;
+            text-align: center;
+        }
+        .input-section {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        #youtube-url {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+            font-size: 16px;
+        }
+        #load-button {
+            padding: 10px 15px;
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #load-button:hover {
+            background-color: #cc0000;
+        }
+        .video-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            margin-bottom: 20px;
+        }
+        #player {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 4px;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .controls button {
+            padding: 10px 15px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .controls button:hover {
+            background-color: #3367d6;
+        }
+        .status {
+            text-align: center;
+            margin-top: 10px;
+            color: #555;
+        }
+        .instructions {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #4285f4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Repeater</h1>
+        
+        <div class="input-section">
+            <input type="text" id="youtube-url" placeholder="Paste YouTube URL here" />
+            <button id="load-button">Load</button>
+        </div>
+        
+        <div class="video-container">
+            <div id="player"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="toggle-repeat">Repeat: ON</button>
+            <button id="restart-video">Restart Video</button>
+        </div>
+        
+        <div class="status" id="status">Ready to play. Paste a YouTube URL above.</div>
+        
+        <div class="instructions">
+            <h3>How to use:</h3>
+            <ol>
+                <li>Paste a YouTube URL in the input field</li>
+                <li>Click "Load" to start playing</li>
+                <li>The video will automatically repeat when it ends</li>
+                <li>Use the controls to toggle repeat or restart the video</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Variables
+        let player;
+        let repeat = true;
+        const toggleRepeatBtn = document.getElementById('toggle-repeat');
+        const restartBtn = document.getElementById('restart-video');
+        const loadBtn = document.getElementById('load-button');
+        const urlInput = document.getElementById('youtube-url');
+        const statusDiv = document.getElementById('status');
+        
+        // Load YouTube IFrame API
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        
+        // This function is called by the YouTube API once it's ready
+        function onYouTubeIframeAPIReady() {
+            // We'll initialize the player when the user clicks the load button
+            loadBtn.addEventListener('click', loadVideo);
+            urlInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    loadVideo();
+                }
+            });
+            
+            toggleRepeatBtn.addEventListener('click', toggleRepeat);
+            restartBtn.addEventListener('click', restartVideo);
+        }
+        
+        function loadVideo() {
+            const url = urlInput.value.trim();
+            if (!url) {
+                updateStatus('Please enter a YouTube URL');
+                return;
+            }
+            
+            const videoId = extractVideoId(url);
+            if (!videoId) {
+                updateStatus('Invalid YouTube URL. Please check and try again.');
+                return;
+            }
+            
+            updateStatus('Loading video...');
+            
+            if (player) {
+                // If player already exists, load new video
+                player.loadVideoById(videoId);
+            } else {
+                // Initialize player with the video
+                player = new YT.Player('player', {
+                    height: '100%',
+                    width: '100%',
+                    videoId: videoId,
+                    playerVars: {
+                        'autoplay': 1,
+                        'controls': 1,
+                        'rel': 0,
+                        'fs': 1
+                    },
+                    events: {
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange,
+                        'onError': onPlayerError
+                    }
+                });
+            }
+        }
+        
+        function onPlayerReady(event) {
+            event.target.playVideo();
+            updateStatus('Video playing. Repeat is ON.');
+        }
+        
+        function onPlayerStateChange(event) {
+            // When video ends (state = 0)
+            if (event.data === YT.PlayerState.ENDED) {
+                if (repeat) {
+                    player.seekTo(0);
+                    player.playVideo();
+                    updateStatus('Video restarted. Repeat is ON.');
+                } else {
+                    updateStatus('Video ended. Repeat is OFF.');
+                }
+            } else if (event.data === YT.PlayerState.PLAYING) {
+                updateStatus('Video playing.' + (repeat ? ' Repeat is ON.' : ' Repeat is OFF.'));
+            }
+        }
+        
+        function onPlayerError(event) {
+            const errorMessages = {
+                2: 'Invalid URL parameter',
+                5: 'HTML5 player error',
+                100: 'Video not found or removed',
+                101: 'Video owner does not allow embedding',
+                150: 'Video owner does not allow embedding'
+            };
+            
+            const errorMsg = errorMessages[event.data] || 'An error occurred with the player';
+            updateStatus('Error: ' + errorMsg);
+        }
+        
+        function toggleRepeat() {
+            repeat = !repeat;
+            toggleRepeatBtn.textContent = `Repeat: ${repeat ? 'ON' : 'OFF'}`;
+            updateStatus(`Repeat is now ${repeat ? 'ON' : 'OFF'}.`);
+        }
+        
+        function restartVideo() {
+            if (player) {
+                player.seekTo(0);
+                player.playVideo();
+                updateStatus('Video restarted.');
+            }
+        }
+        
+        function extractVideoId(url) {
+            // Match YouTube URLs in these formats:
+            // https://www.youtube.com/watch?v=VIDEO_ID
+            // https://youtu.be/VIDEO_ID
+            // https://youtube.com/shorts/VIDEO_ID
+            
+            let videoId = null;
+            
+            // Regular watch URL
+            const watchRegex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+            const watchMatch = url.match(watchRegex);
+            
+            if (watchMatch && watchMatch[1]) {
+                videoId = watchMatch[1];
+            }
+            
+            // Shorts URL
+            const shortsRegex = /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/;
+            const shortsMatch = url.match(shortsRegex);
+            
+            if (shortsMatch && shortsMatch[1]) {
+                videoId = shortsMatch[1];
+            }
+            
+            return videoId;
+        }
+        
+        function updateStatus(message) {
+            statusDiv.textContent = message;
+        }
+    </script>
+</body>
+</html>
