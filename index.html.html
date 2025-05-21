@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Looper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            color: #cc0000;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .input-group {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #cc0000;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #990000;
+        }
+        .video-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+            height: 0;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        .video-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-left: 4px solid #cc0000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Video Looper</h1>
+        
+        <div class="input-group">
+            <input type="text" id="videoInput" placeholder="Paste YouTube URL or video ID here" />
+            <button onclick="embedVideo()">Loop Video</button>
+        </div>
+        
+        <div id="player" class="video-container">
+            <!-- YouTube iframe will be inserted here -->
+        </div>
+        
+        <div class="instructions">
+            <p><strong>Instructions:</strong></p>
+            <p>1. Paste a YouTube URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ) or just the video ID (e.g., dQw4w9WgXcQ)</p>
+            <p>2. Click "Loop Video" to start playing the video on loop</p>
+            <p>3. The video will automatically play and loop indefinitely</p>
+        </div>
+    </div>
+
+    <script>
+        // Function to extract YouTube video ID from URL or use the provided ID
+        function extractVideoId(input) {
+            // Regular expressions to match various YouTube URL formats
+            const patterns = [
+                /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([^&]+)/i,  // Standard YouTube URL
+                /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([^?]+)/i,              // Shortened YouTube URL
+                /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([^?]+)/i     // Embed URL
+            ];
+            
+            // Try to match the input against the patterns
+            for (const pattern of patterns) {
+                const match = input.match(pattern);
+                if (match && match[1]) {
+                    return match[1];
+                }
+            }
+            
+            // If no matches found, assume the input is already a video ID
+            // YouTube video IDs are typically 11 characters long
+            if (input.length >= 8 && input.length <= 12 && !input.includes(' ')) {
+                return input;
+            }
+            
+            return null;
+        }
+        
+        // Function to embed the YouTube video with looping enabled
+        function embedVideo() {
+            const input = document.getElementById('videoInput').value.trim();
+            const videoId = extractVideoId(input);
+            
+            if (!videoId) {
+                alert('Please enter a valid YouTube URL or video ID');
+                return;
+            }
+            
+            // Create the iframe with looping parameters
+            // The playlist parameter needs to contain the video ID to enable looping
+            const iframe = document.createElement('iframe');
+            iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&loop=1&playlist=${videoId}&rel=0`;
+            iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+            iframe.allowFullscreen = true;
+            
+            // Clear the player div and append the new iframe
+            const playerDiv = document.getElementById('player');
+            playerDiv.innerHTML = '';
+            playerDiv.appendChild(iframe);
+        }
+        
+        // Allow Enter key to trigger video embedding
+        document.getElementById('videoInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                embedVideo();
+            }
+        });
+    </script>
+</body>
+</html>
